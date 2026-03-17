@@ -2,7 +2,7 @@
 
 int main() {
   // создаем объект клиента
-  ChatClient client("127.0.0.1", PORT);
+  ChatClient client("109.120.187.67", PORT);
 
   // пытаемся постучаться к серверу
   if (client.connect_to_server()) {
