@@ -118,7 +118,7 @@ void ChatServer::handle_client(int client_fd) {
 
       std::string msg = user_name + ": " + std::string(buffer, bytes_received);
       broadcast_message(msg, client_fd);
-      std::cout << "[LOG] " << user_name << ":" << msg << '\n';
+      std::cout << "[LOG] [" << client_fd << "] " << msg << '\n';
     }
   } else {
     std::cout << "[LOG] Клиент отключился на этапе регистрации (FD: " << client_fd << ")\n";
