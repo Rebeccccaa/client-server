@@ -44,10 +44,15 @@ bool ChatClient::connect_to_server() {
 void ChatClient::run() {
   // регистрируем имя
   std::cout << "Введите имя пользователя: ";
-  std::getline(std::cin, user_name);
+  while (user_name.empty()) std::getline(std::cin, user_name);
+  // AUTH пакет
+  json auth;
+  auth["type"] = "AUTH";
+  auth["sender"] = user_name;
+  auth["timestamp"] = std::time(nullptr);
 
-  // отправляем имя первым пакетом (как договорились в протоколе сервера)
-  send(client_fd, user_name.c_str(), user_name.size(), 0);
+  std::string out_auth = auth.dump();
+  send(client_fd, out_auth.c_str(), out_auth.size(), 0);
 
   // запускаем фоновый поток для приема сообщений
   std::thread receiver_thread(&ChatClient::receive_messages, this);
@@ -55,16 +60,24 @@ void ChatClient::run() {
   receiver_thread.detach();
 
   // основной цикл отправки сообщений
-  std::string message;
+  std::string text;
   while (true) {
     std::cout << "> ";
-    std::getline(std::cin, message);
+    std::getline(std::cin, text);
 
-    if (message.empty()) continue;
-    if (message == COMMAND_EXIT) break;  // команда для выхода
+    if (text.empty() || text == "\n") continue;
+    if (text == COMMAND_EXIT) break;  // команда для выхода
+
+    // CHAT пакет
+    json chat;
+    chat["type"] = "CHAT";
+    chat["sender"] = user_name;
+    chat["text"] = text;
+    chat["timestamp"] = std::time(nullptr);
 
     // отправляем текст на сервер (а сервер в свою очередь всем другим клиентам)
-    send(client_fd, message.c_str(), message.size(), 0);
+    std::string out_chat = chat.dump();
+    send(client_fd, out_chat.c_str(), out_chat.size(), 0);
   }
 }
 
@@ -73,20 +86,51 @@ void ChatClient::receive_messages() {
   char buffer[BUFFER_SIZE];
   while (true) {
     memset(buffer, 0, BUFFER_SIZE);
-
-    // поток засыпает здесь, ожидая данные от сервера
     int bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
 
     if (bytes_received <= 0) {
-      // если сервер закрыл соединение или произошла ошибка
-      std::cout << "\n[СИСТЕМА] Соединение с сервером потеряно." << std::endl;
-      // можно попробовать переподключиться в дальнейшем
+      // форматируем время
+      std::time_t ts = time(nullptr);
+      std::tm* now = std::localtime(&ts);
+      char time_str[10];
+      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+      std::cout << "\n[" << time_str << "] [SERVER] Соединение разорвано." << std::endl;
       exit(0);
     }
 
-    // выводим полученное сообщение на экран
-    // \n нужен, чтобы сообщение не слиплось с приглашением к вводу "> "
-    std::cout << "\r" << std::string(buffer, bytes_received) << std::endl;
-    std::cout << "> " << std::flush;
+    try {
+      // 1. Распаковываем JSON
+      auto json_msg = json::parse(std::string(buffer, bytes_received));
+
+      // 2. Достаем и форматируем время
+      std::time_t ts = json_msg.at("timestamp").get<std::time_t>();
+      std::tm* now = std::localtime(&ts);
+      char time_str[10];
+      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+      // 3. Логика вывода в зависимости от типа
+      std::string type = json_msg.at("type");
+      std::string sender = json_msg.at("sender");
+      std::string text = json_msg.value("text", "");  // если SYSTEM, текста может не быть
+
+      // Возврат каретки \r, чтобы стереть текущее приглашение "> "
+      std::cout << "\r";
+
+      if (type == "SYSTEM") {
+        std::cout << "[" << time_str << "] *** " << text << " ***" << std::endl;
+      } else if (type == "AUTH") {
+        std::cout << "[" << time_str << "] Пользователь " << sender << text << std::endl;
+      } else {
+        std::cout << "[" << time_str << "] " << sender << ": " << text << std::endl;
+      }
+
+      // Возвращаем приглашение к вводу
+      std::cout << "> " << std::flush;
+
+    } catch (const std::exception& e) {
+      // Если пришел мусор, который не парсится
+      // std::cerr << "\n[ОШИБКА] Некорректный формат данных от сервера" << std::endl;
+    }
   }
 }

@@ -38,7 +38,13 @@ bool ChatServer::start() {
     return false;
   }
 
-  std::cout << "[SERVER] Успешно запущен. Слушаем порт " << port << "..." << std::endl;
+  // форматируем время
+  std::time_t ts = time(nullptr);
+  std::tm* now = std::localtime(&ts);
+  char time_str[10];
+  std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+  std::cout << '[' << time_str << "] [SERVER] Успешно запущен. Слушаем порт " << port << "..." << std::endl;
   return true;
 }
 
@@ -59,7 +65,14 @@ void ChatServer::run() {
     // логируем IP-адрес нового клиента (превращаем бинарный IP в строку)
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-    std::cout << "[SERVER] Новое подключение: " << client_ip << " (FD: " << new_client_fd << ")" << std::endl;
+
+    // форматируем время
+    std::time_t ts = time(nullptr);
+    std::tm* now = std::localtime(&ts);
+    char time_str[10];
+    std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+    std::cout << '[' << time_str << "] [SERVER] Новое подключение: " << client_ip << " (FD: " << new_client_fd << ")" << std::endl;
 
     // сначала добавляем дескриптор в общий список (под защитой мьютекса)
     {
@@ -97,31 +110,100 @@ void ChatServer::handle_client(int client_fd) {
   /// если клиент отключился сразу, закрываем.
 
   if (bytes_received > 0) {
-    // берем из буфера наше сообщение (имя пользователя) и выводим его в отладку
-    std::string user_name(buffer, bytes_received);
-    std::cout << "[LOG] " << user_name << " подключился к серверу.\n";
-
-    // также выводим имя всем остальным пользователям
-    broadcast_message(user_name + " присоединяется к чату!\n", client_fd);
-
-    // бесконечный цикл ожидания сообщения от клиента до тех пор пока он не выйдет
-    while (true) {
-      // очищаем старый буффер
-      memset(buffer, 0, BUFFER_SIZE);
-
-      // засыпаем в ожидании сообщения от клиента
-      bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
-      if (bytes_received <= 0) {
-        std::cout << "[LOG] " << user_name << " покинул чат." << std::endl;
-        break;
+    try {
+      auto msg_json = json::parse(std::string(buffer, bytes_received));
+      if (!msg_json.contains("type") || !msg_json.contains("type") || msg_json["type"].get<std::string>() != "AUTH") {
+        throw std::runtime_error("Expected AUTH message");
       }
+      if (!msg_json.contains("sender") || msg_json["sender"].get<std::string>().empty()) {
+        throw std::runtime_error("Empty or invalid AUTH sender");
+      }
+      if (!msg_json.contains("timestamp") || !msg_json["timestamp"].is_number()) {
+        throw std::runtime_error("Empty or invalid AUTH time when send");
+      }
+      std::string user_name = msg_json["sender"].get<std::string>();
+      msg_json["text"] = " присоединяется к чату.";
 
-      std::string msg = user_name + ": " + std::string(buffer, bytes_received);
-      broadcast_message(msg, client_fd);
-      std::cout << "[LOG] [" << client_fd << "] " << msg << '\n';
+      // достаем и форматируем время
+      std::time_t ts = msg_json.at("timestamp").get<std::time_t>();
+      std::tm* now = std::localtime(&ts);
+      char time_str[10];
+      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+      std::cout << '[' << time_str << "] [LOG] " << msg_json["sender"].get<std::string>() << " подключился к серверу.\n";
+
+      // также выводим имя всем остальным пользователям
+      broadcast_message(msg_json.dump(), client_fd);
+
+      // бесконечный цикл ожидания сообщения от клиента до тех пор пока он не выйдет
+      while (true) {
+        // очищаем старый буффер
+        memset(buffer, 0, BUFFER_SIZE);
+
+        // засыпаем в ожидании сообщения от клиента
+        bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
+        if (bytes_received <= 0) {
+          json msg_leave_json;
+          msg_leave_json["type"] = "AUTH";
+          msg_leave_json["sender"] = user_name;
+          msg_leave_json["text"] = " покинул чат.";
+          msg_leave_json["timestamp"] = std::time(nullptr);
+          broadcast_message(msg_leave_json.dump(), client_fd);
+          // достаем и форматируем время
+          std::time_t ts = msg_leave_json.at("timestamp").get<std::time_t>();
+          std::tm* now = std::localtime(&ts);
+          char time_str[10];
+          std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+          std::cout << '[' << time_str << "] [LOG] " << user_name << " покинул чат." << std::endl;
+          break;
+        }
+        msg_json = json::parse(std::string(buffer, bytes_received));
+        if (!msg_json.contains("type") || !msg_json.contains("type") || msg_json["type"].get<std::string>() != "CHAT") {
+          throw std::runtime_error("Expected CHAT message");
+        }
+        if (!msg_json.contains("sender") || msg_json["sender"].get<std::string>().empty()) {
+          throw std::runtime_error("Empty or invalid CHAT sender");
+        }
+        if (!msg_json.contains("text") || msg_json["text"].get<std::string>().empty()) {
+          throw std::runtime_error("Empty or invalid text CHAT message");
+        }
+        if (!msg_json.contains("timestamp") || !msg_json["timestamp"].is_number()) {
+          throw std::runtime_error("Empty or invalid CHAT time when send");
+        }
+        broadcast_message(msg_json.dump(), client_fd);
+
+        // достаем и форматируем время
+        std::time_t ts = msg_json.at("timestamp").get<std::time_t>();
+        std::tm* now = std::localtime(&ts);
+        char time_str[10];
+        std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+        std::cout << '[' << time_str << "] [LOG] [" << client_fd << "] " << msg_json["text"].get<std::string>() << '\n';
+      }
+    } catch (const json::parse_error& e) {
+      // форматируем время
+      std::time_t ts = time(nullptr);
+      std::tm* now = std::localtime(&ts);
+      char time_str[10];
+      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+      std::cout << '[' << time_str << "] [ERROR] Ошибка парсинга JSON: " << e.what() << "\n";
+    } catch (const std::exception& e) {
+      // форматируем время
+      std::time_t ts = time(nullptr);
+      std::tm* now = std::localtime(&ts);
+      char time_str[10];
+      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+
+      std::cout << '[' << time_str << "] [ERROR] Ошибка протокола: " << e.what() << "\n";
     }
   } else {
-    std::cout << "[LOG] Клиент отключился на этапе регистрации (FD: " << client_fd << ")\n";
+    // форматируем время
+    std::time_t ts = time(nullptr);
+    std::tm* now = std::localtime(&ts);
+    char time_str[10];
+    std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+    std::cout << '[' << time_str << "] [LOG] Клиент отключился на этапе регистрации (FD: " << client_fd << ")\n";
   }
   // УБОРКА ЗА СОБОЙ
   // когда цикл прервался (клиент вышел), нам нужно почистить список.
