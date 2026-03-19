@@ -1,16 +1,28 @@
+#include <memory>
+
 #include "server.hpp"
 
 int main() {
-  // создаем экземпляр нашего сервера
-  ChatServer server(PORT);
+  try {
+    // если внутри try случится ошибка, деструктор ChatServer
+    // вызовется автоматически и корректно закроет сокет.
+    auto server = std::make_unique<ChatServer>(PORT);
 
-  // инициализируем сокеты (socket, bind, listen)
-  if (server.start()) {
-    // запускаем бесконечный цикл приема новых клиентов
-    server.run();
+    // настройка сетевых ресурсов
+    if (server->start()) {
+      // запуск бесконечного цикла
+      server->run();
 
-  } else {
-    std::cerr << "[CRITICAL] Не удалось запустить сервер. Проверьте порт!" << std::endl;
+    } else {
+      std::cerr << "[CRITICAL] Ошибка при старте сервера на порту " << PORT << std::endl;
+      return 1;
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "[FATAL ERROR] Непредвиденная ошибка сервера: " << e.what() << std::endl;
+    return 1;
+  } catch (...) {
+    // ловим, что не является std::exception
+    std::cerr << "[UNKNOWN ERROR] Произошла неизвестная критическая ошибка!" << std::endl;
     return 1;
   }
 

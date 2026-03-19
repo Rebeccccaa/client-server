@@ -5,6 +5,7 @@ ChatClient::ChatClient(const std::string& ip, int port) : server_ip(ip), port(po
 ChatClient::~ChatClient() {
   if (client_fd != -1) {
     close(client_fd);
+    client_fd = -1;
   }
 }
 

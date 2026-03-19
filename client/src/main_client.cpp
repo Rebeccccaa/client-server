@@ -1,16 +1,22 @@
+#include <memory>
+
 #include "client.hpp"
 
 int main() {
-  // создаем объект клиента
-  // ChatClient client("109.120.187.67", PORT);
-  ChatClient client("127.0.0.1", PORT);
-  // пытаемся постучаться к серверу
-  if (client.connect_to_server()) {
-    // запускаем основной цикл (ввод имени, запуск фонового потока и отправка сообщений)
-    client.run();
-  } else {
-    std::cerr << "[CRITICAL] Не удалось подключиться к серверу. "
-              << "Проверьте, запущен ли он!" << std::endl;
+  try {
+    // используем умный указатель вместо обычного объекта на стеке
+    auto client = std::make_unique<ChatClient>("127.0.0.1", PORT);
+    // auto client = std::make_unique<ChatClient>("109.120.187.67", PORT);
+
+    if (client->connect_to_server()) {
+      client->run();
+    } else {
+      std::cerr << "[CRITICAL] Сервер недоступен!" << std::endl;
+      return 1;
+    }
+  } catch (const std::exception& e) {
+    // что-то пошло не так внутри run(), умный указатель вызовет деструктор
+    std::cerr << "[FATAL] Произошла ошибка: " << e.what() << std::endl;
     return 1;
   }
 
