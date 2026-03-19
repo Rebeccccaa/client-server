@@ -9,6 +9,12 @@ class ChatServer {
   // гарантирует закрытие главного сокета при выключении программы
   ~ChatServer();
 
+  // запрещаем копирование, копирование присваиванием, перемещение и перемещение присваиванием
+  ChatServer(const ChatServer&) = delete;
+  ChatServer& operator=(const ChatServer&) = delete;
+  ChatServer(ChatServer&&) = delete;
+  ChatServer& operator=(ChatServer&&) = delete;
+
   // метод для настройки сокета (socket, bind, listen)
   bool start();
 

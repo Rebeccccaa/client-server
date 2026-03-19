@@ -5,7 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
-#include <ctime>  // Для работы со временем
+#include <ctime>
 #include <iostream>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -13,10 +13,9 @@
 #include <thread>
 #include <vector>
 
-// Создаем короткий псевдоним для удобства
 using json = nlohmann::json;
 
 const int PORT = 7777;
 const int BUFFER_SIZE = 4096;
-const int LISTEN_BACKLOG = 10;  // Максимальная очередь ожидающих соединений
+const int LISTEN_BACKLOG = 10;  // максимальная очередь ожидающих соединений
 const std::string COMMAND_EXIT = "/exit";

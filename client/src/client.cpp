@@ -90,31 +90,25 @@ void ChatClient::receive_messages() {
 
     if (bytes_received <= 0) {
       // форматируем время
-      std::time_t ts = time(nullptr);
-      std::tm* now = std::localtime(&ts);
-      char time_str[10];
-      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+      std::string time_str = get_and_format_time();
 
       std::cout << "\n[" << time_str << "] [SERVER] Соединение разорвано." << std::endl;
       exit(0);
     }
 
     try {
-      // 1. Распаковываем JSON
+      // распаковываем JSON
       auto json_msg = json::parse(std::string(buffer, bytes_received));
 
-      // 2. Достаем и форматируем время
-      std::time_t ts = json_msg.at("timestamp").get<std::time_t>();
-      std::tm* now = std::localtime(&ts);
-      char time_str[10];
-      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+      // достаем и форматируем время
+      std::string time_str = get_and_format_time(json_msg.at("timestamp").get<std::time_t>());
 
-      // 3. Логика вывода в зависимости от типа
+      // тоже достаем из json
       std::string type = json_msg.at("type");
       std::string sender = json_msg.at("sender");
       std::string text = json_msg.value("text", "");  // если SYSTEM, текста может не быть
 
-      // Возврат каретки \r, чтобы стереть текущее приглашение "> "
+      // возврат каретки \r, чтобы стереть текущее приглашение "> "
       std::cout << "\r";
 
       if (type == "SYSTEM") {
@@ -125,12 +119,27 @@ void ChatClient::receive_messages() {
         std::cout << "[" << time_str << "] " << sender << ": " << text << std::endl;
       }
 
-      // Возвращаем приглашение к вводу
+      // возвращаем приглашение к вводу
       std::cout << "> " << std::flush;
-
     } catch (const std::exception& e) {
-      // Если пришел мусор, который не парсится
-      // std::cerr << "\n[ОШИБКА] Некорректный формат данных от сервера" << std::endl;
+      // если пришел мусор, который не парсится
+      std::cerr << get_and_format_time() << "\n[ОШИБКА] Некорректный формат данных от сервера" << std::endl;
     }
   }
+}
+
+std::string ChatClient::get_and_format_time() {
+  std::time_t ts = time(nullptr);
+  std::tm* now = std::localtime(&ts);
+  char time_str[10];
+  std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+  return (std::string)time_str;
+}
+
+std::string ChatClient::get_and_format_time(std::time_t time_in_seconds) {
+  std::time_t ts = time_in_seconds;
+  std::tm* now = std::localtime(&ts);
+  char time_str[10];
+  std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
+  return std::string();
 }
