@@ -3,6 +3,19 @@
 #include "server.hpp"
 
 int main() {
+  // настраиваем структуру sigaction вместо std::signal. Нужно для того чтобы accept мог завершиться
+  struct sigaction sa;
+  sa.sa_handler = ChatServer::signal_handler;  // наш статический метод
+  sigemptyset(&sa.sa_mask);
+
+  // это заставит accept() в методе run() мгновенно вернуть -1 при нажатии Ctrl+C
+  sa.sa_flags = 0;
+
+  if (sigaction(SIGINT, &sa, nullptr) == -1) {
+    std::cerr << "[CRITICAL] Не удалось настроить обработчик сигналов!" << std::endl;
+    return 1;
+  }
+
   try {
     // если внутри try случится ошибка, деструктор ChatServer
     // вызовется автоматически и корректно закроет сокет.

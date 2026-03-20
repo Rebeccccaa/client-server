@@ -9,6 +9,15 @@ ChatServer::~ChatServer() {
   }
 }
 
+std::atomic<bool> ChatServer::is_running(true);
+
+void ChatServer::signal_handler(int signal) {
+  if (signal == SIGINT) {
+    std::cout << "\n[SIGNAL] Завершение работы сервера..." << std::endl;
+    ChatServer::is_running = false;
+  }
+}
+
 bool ChatServer::start() {
   // создаем сокет(IPv4, TCP, выбор протокола по умолчанию (TCP)) и присваиваем его файловому дескриптору
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -49,7 +58,7 @@ bool ChatServer::start() {
 }
 
 void ChatServer::run() {
-  while (true) {
+  while (ChatServer::is_running) {
     sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
 
@@ -58,6 +67,10 @@ void ChatServer::run() {
     int new_client_fd = accept(server_fd, (sockaddr*)&client_addr, &addrlen);
 
     if (new_client_fd < 0) {
+      // если выключили сервер
+      if (!ChatServer::is_running) {
+        break;
+      }
       std::cerr << "[ERROR] Не удалось принять соединение" << std::endl;
       continue;
     }
@@ -72,7 +85,8 @@ void ChatServer::run() {
     char time_str[10];
     std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
 
-    std::cout << '[' << time_str << "] [SERVER] Новое подключение: " << client_ip << " (FD: " << new_client_fd << ")" << std::endl;
+    std::cout << '[' << time_str << "] [SERVER] Новое подключение: " << client_ip << " (FD: " << new_client_fd << ")"
+              << std::endl;
 
     // сначала добавляем дескриптор в общий список (под защитой мьютекса)
     {
@@ -86,6 +100,8 @@ void ChatServer::run() {
     // поток
     std::thread(&ChatServer::handle_client, this, new_client_fd).detach();
   }
+  // когда цикл завершился
+  std::cout << "[SERVER] Основной цикл приема завершен. Ожидание закрытия ресурсов..." << std::endl;
 }
 
 void ChatServer::broadcast_message(const std::string& message, int sender_fd) {
@@ -130,7 +146,8 @@ void ChatServer::handle_client(int client_fd) {
       char time_str[10];
       std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
 
-      std::cout << '[' << time_str << "] [LOG] " << msg_json["sender"].get<std::string>() << " подключился к серверу.\n";
+      std::cout << '[' << time_str << "] [LOG] " << msg_json["sender"].get<std::string>()
+                << " подключился к серверу.\n";
 
       // также выводим имя всем остальным пользователям
       broadcast_message(msg_json.dump(), client_fd);

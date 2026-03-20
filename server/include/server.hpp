@@ -9,6 +9,12 @@ class ChatServer {
   // гарантирует закрытие главного сокета при выключении программы
   ~ChatServer();
 
+  // метод для обработки сигналов
+  static void signal_handler(int signal);
+
+  // атомарный флаг гарантирует корректную работу в многопоточной среде
+  static std::atomic<bool> is_running;
+
   // запрещаем копирование, копирование присваиванием, перемещение и перемещение присваиванием
   ChatServer(const ChatServer&) = delete;
   ChatServer& operator=(const ChatServer&) = delete;

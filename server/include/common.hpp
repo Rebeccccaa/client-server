@@ -4,6 +4,8 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
+#include <csignal>
 #include <cstring>
 #include <ctime>
 #include <iostream>
@@ -12,7 +14,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 using json = nlohmann::json;
 
 const int PORT = 7777;
