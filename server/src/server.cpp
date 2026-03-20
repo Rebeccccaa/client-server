@@ -1,11 +1,16 @@
 #include "server.hpp"
 
-ChatServer::ChatServer(int port) : port(port), server_fd(-1) {}
+ChatServer::ChatServer(int port) : port(port), server_fd(-1) {
+  // инициализируем логгер
+  init_logger();
+
+  logger->info("Инициализация сервера на порту {}...", port);
+}
 
 ChatServer::~ChatServer() {
   if (server_fd != -1) {
     close(server_fd);
-    std::cout << "[SERVER] Сокет закрыт, сервер остановлен." << std::endl;
+    logger->info("Сокет сервера (FD: {}) закрыт.", server_fd);
   }
 }
 
@@ -13,6 +18,7 @@ std::atomic<bool> ChatServer::is_running(true);
 
 void ChatServer::signal_handler(int signal) {
   if (signal == SIGINT) {
+    // т.к. логер статический метод, то cout,но можно сделать его глобальным
     std::cout << "\n[SIGNAL] Завершение работы сервера..." << std::endl;
     ChatServer::is_running = false;
   }
@@ -21,6 +27,11 @@ void ChatServer::signal_handler(int signal) {
 bool ChatServer::start() {
   // создаем сокет(IPv4, TCP, выбор протокола по умолчанию (TCP)) и присваиваем его файловому дескриптору
   server_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+  if (server_fd == -1) {
+    logger->error("Не удалось создать сокет: {}", strerror(errno));
+    return false;
+  }
 
   // защита от ошибки "Address already in use"
   int opt = 1;
@@ -37,23 +48,17 @@ bool ChatServer::start() {
 
   // закрепляем за дескриптором (server_fd) этот адрес и порт
   if (bind(server_fd, (sockaddr*)&address, sizeof(address)) < 0) {
-    std::cerr << "[ERROR] Не удалось привязать сокет к порту " << port << std::endl;
+    logger->error("Не удалось привязать сокет к порту {}: {}", port, strerror(errno));
     return false;
   }
 
   // ставим сокет в состояние "прослушивание", то есть принимает входящие
   if (listen(server_fd, LISTEN_BACKLOG) < 0) {
-    std::cerr << "[ERROR] Ошибка при переходе в режим listen" << std::endl;
+    logger->error("Ошибка при переходе в режим listen: {}", strerror(errno));
     return false;
   }
 
-  // форматируем время
-  std::time_t ts = time(nullptr);
-  std::tm* now = std::localtime(&ts);
-  char time_str[10];
-  std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-  std::cout << '[' << time_str << "] [SERVER] Успешно запущен. Слушаем порт " << port << "..." << std::endl;
+  logger->info("Сервер успешно запущен. Слушаем порт {}...", port);
   return true;
 }
 
@@ -61,6 +66,7 @@ void ChatServer::run() {
   while (ChatServer::is_running) {
     sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
+    logger->info("Основной цикл сервера run() запущен. Ожидание подключений...");
 
     // accept() — блокирующий вызов. Программа замирает здесь,
     // пока кто-то не постучится в порт
@@ -71,7 +77,10 @@ void ChatServer::run() {
       if (!ChatServer::is_running) {
         break;
       }
-      std::cerr << "[ERROR] Не удалось принять соединение" << std::endl;
+
+      // strerror(errno) если accept вернет ошибку, logger запишет не просто «ошибка», а
+      // конкретную причину от ОС (например, «Too many open files»).
+      logger->error("Ошибка accept: {}", strerror(errno));
       continue;
     }
 
@@ -79,14 +88,7 @@ void ChatServer::run() {
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
 
-    // форматируем время
-    std::time_t ts = time(nullptr);
-    std::tm* now = std::localtime(&ts);
-    char time_str[10];
-    std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-    std::cout << '[' << time_str << "] [SERVER] Новое подключение: " << client_ip << " (FD: " << new_client_fd << ")"
-              << std::endl;
+    logger->info("Новое подключение: {} (FD: {})", client_ip, new_client_fd);
 
     // сначала добавляем дескриптор в общий список (под защитой мьютекса)
     {
@@ -101,7 +103,7 @@ void ChatServer::run() {
     std::thread(&ChatServer::handle_client, this, new_client_fd).detach();
   }
   // когда цикл завершился
-  std::cout << "[SERVER] Основной цикл приема завершен. Ожидание закрытия ресурсов..." << std::endl;
+  logger->warn("Основной цикл приема завершен. Ожидание закрытия ресурсов...");
 }
 
 void ChatServer::broadcast_message(const std::string& message, int sender_fd) {
@@ -118,10 +120,37 @@ void ChatServer::broadcast_message(const std::string& message, int sender_fd) {
   }
 }  // замок открывается
 
+// инициализация логера
+void ChatServer::init_logger() {
+  try {
+    // cоздаем стоки (куда писать)
+    // _mt означает multi-threaded (потокобезопасно)
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("server.log", true);
+
+    // объединяем их в один объект логгера
+    std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+    logger = std::make_shared<spdlog::logger>("ChatServer", sinks.begin(), sinks.end());
+
+    // настраиваем формат: [Время] [Уровень] Сообщение
+    // %^...%$ раскрашивает уровень лога в консоли (красный для ошибок итд)
+    logger->set_pattern("[%Y-%m-%d %H:%M:%S] [%^%l%$] %v");
+
+    // устанавливаем уровень фильтрации (пока пишем всё от INFO и выше)
+    logger->set_level(spdlog::level::info);
+
+    logger->info("Система логирования инициализирована.");
+  } catch (const spdlog::spdlog_ex& ex) {
+    std::cerr << "Критическая ошибка инициализации логов: " << ex.what() << std::endl;
+  }
+}
+
 void ChatServer::handle_client(int client_fd) {
   char buffer[BUFFER_SIZE];
+  std::string user_name = "Unknown";
 
-  // recv - поток засыпает до тех пор, пока клиент не пришлет данные и возвращает кол-во байт, которое заняло сообщение
+  // recv - поток засыпает до тех пор, пока клиент не пришлет данные и возвращает кол-во байт, которое заняло
+  // сообщение
   int bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
   /// если клиент отключился сразу, закрываем.
 
@@ -137,17 +166,11 @@ void ChatServer::handle_client(int client_fd) {
       if (!msg_json.contains("timestamp") || !msg_json["timestamp"].is_number()) {
         throw std::runtime_error("Empty or invalid AUTH time when send");
       }
-      std::string user_name = msg_json["sender"].get<std::string>();
+      user_name = msg_json["sender"].get<std::string>();
       msg_json["text"] = " присоединяется к чату.";
 
-      // достаем и форматируем время
-      std::time_t ts = msg_json.at("timestamp").get<std::time_t>();
-      std::tm* now = std::localtime(&ts);
-      char time_str[10];
-      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-      std::cout << '[' << time_str << "] [LOG] " << msg_json["sender"].get<std::string>()
-                << " подключился к серверу.\n";
+      // Логируем вход
+      logger->info("Пользователь {} подключился (FD: {})", user_name, client_fd);
 
       // также выводим имя всем остальным пользователям
       broadcast_message(msg_json.dump(), client_fd);
@@ -166,16 +189,12 @@ void ChatServer::handle_client(int client_fd) {
           msg_leave_json["text"] = " покинул чат.";
           msg_leave_json["timestamp"] = std::time(nullptr);
           broadcast_message(msg_leave_json.dump(), client_fd);
-          // достаем и форматируем время
-          std::time_t ts = msg_leave_json.at("timestamp").get<std::time_t>();
-          std::tm* now = std::localtime(&ts);
-          char time_str[10];
-          std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-          std::cout << '[' << time_str << "] [LOG] " << user_name << " покинул чат." << std::endl;
+          logger->info("Пользователь {} покинул чат.", user_name);
           break;
         }
+
         msg_json = json::parse(std::string(buffer, bytes_received));
+
         if (!msg_json.contains("type") || !msg_json.contains("type") || msg_json["type"].get<std::string>() != "CHAT") {
           throw std::runtime_error("Expected CHAT message");
         }
@@ -190,37 +209,16 @@ void ChatServer::handle_client(int client_fd) {
         }
         broadcast_message(msg_json.dump(), client_fd);
 
-        // достаем и форматируем время
-        std::time_t ts = msg_json.at("timestamp").get<std::time_t>();
-        std::tm* now = std::localtime(&ts);
-        char time_str[10];
-        std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-        std::cout << '[' << time_str << "] [LOG] [" << client_fd << "] " << msg_json["text"].get<std::string>() << '\n';
+        // Логируем текст сообщения
+        logger->info("[{}] {}: {}", client_fd, user_name, msg_json["text"].get<std::string>());
       }
     } catch (const json::parse_error& e) {
-      // форматируем время
-      std::time_t ts = time(nullptr);
-      std::tm* now = std::localtime(&ts);
-      char time_str[10];
-      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-      std::cout << '[' << time_str << "] [ERROR] Ошибка парсинга JSON: " << e.what() << "\n";
+      logger->error("Ошибка парсинга JSON от FD {}: {}", client_fd, e.what());
     } catch (const std::exception& e) {
-      // форматируем время
-      std::time_t ts = time(nullptr);
-      std::tm* now = std::localtime(&ts);
-      char time_str[10];
-      std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-
-      std::cout << '[' << time_str << "] [ERROR] Ошибка протокола: " << e.what() << "\n";
+      logger->error("Ошибка протокола для {}: {}", user_name, e.what());
     }
   } else {
-    // форматируем время
-    std::time_t ts = time(nullptr);
-    std::tm* now = std::localtime(&ts);
-    char time_str[10];
-    std::strftime(time_str, sizeof(time_str), "%H:%M:%S", now);
-    std::cout << '[' << time_str << "] [LOG] Клиент отключился на этапе регистрации (FD: " << client_fd << ")\n";
+    logger->warn("Клиент отключился на этапе регистрации (FD: {})", client_fd);
   }
   // УБОРКА ЗА СОБОЙ
   // когда цикл прервался (клиент вышел), нам нужно почистить список.

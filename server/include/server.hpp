@@ -9,17 +9,17 @@ class ChatServer {
   // гарантирует закрытие главного сокета при выключении программы
   ~ChatServer();
 
-  // метод для обработки сигналов
-  static void signal_handler(int signal);
-
-  // атомарный флаг гарантирует корректную работу в многопоточной среде
-  static std::atomic<bool> is_running;
-
   // запрещаем копирование, копирование присваиванием, перемещение и перемещение присваиванием
   ChatServer(const ChatServer&) = delete;
   ChatServer& operator=(const ChatServer&) = delete;
   ChatServer(ChatServer&&) = delete;
   ChatServer& operator=(ChatServer&&) = delete;
+
+  // метод для обработки сигналов
+  static void signal_handler(int signal);
+
+  // атомарный флаг гарантирует корректную работу в многопоточной среде
+  static std::atomic<bool> is_running;
 
   // метод для настройки сокета (socket, bind, listen)
   bool start();
@@ -28,6 +28,11 @@ class ChatServer {
   void run();
 
  private:
+  // поле для логгера
+  std::shared_ptr<spdlog::logger> logger;
+
+  void init_logger();  // метод для настройки логов
+
   // метод для работы с конкретным клиентом в отдельном потоке,
   // мы передаем в него дескриптор, который получили от accept (run)
   void handle_client(int client_fd);

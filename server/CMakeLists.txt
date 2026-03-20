@@ -24,4 +24,5 @@ add_executable(chat_server
 target_link_libraries(chat_server 
     Threads::Threads 
     sqlite3
+    spdlog::spdlog
 )
