@@ -9,17 +9,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Мы используем ${CMAKE_CURRENT_SOURCE_DIR}, чтобы пути были абсолютными и надежными
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# 2. Находим библиотеку потоков
+# 2. Находим пакет spdlog (он установит цель spdlog::spdlog)
+find_package(spdlog REQUIRED)
+
+# 3. Находим библиотеку потоков
 find_package(Threads REQUIRED)
 
-# 3. Создаем исполняемый файл. 
+# 4. Создаем исполняемый файл. 
 # Указываем ПРАВИЛЬНЫЕ пути к файлам внутри папки src
 add_executable(chat_server 
     src/main_server.cpp 
     src/server.cpp
 )
 
-# 4. Привязываем библиотеки
+# 5. Привязываем библиотеки
 # Добавляем sqlite3 для будущего этапа
 target_link_libraries(chat_server 
     Threads::Threads 

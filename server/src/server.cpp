@@ -1,10 +1,20 @@
 #include "server.hpp"
 
-ChatServer::ChatServer(int port) : port(port), server_fd(-1) {
-  // инициализируем логгер
+ChatServer::ChatServer(const std::string& config_path) : server_fd(-1), db(nullptr) {
+  // инициализируем систему логирования
   init_logger();
+  // загружаем конфиг
+  if (!load_config(config_path)) {
+    // если файла нет или с ним чтото не так берем дефолты из common.hpp
+    this->port = PORT;
+    this->db_path = DB_PATH;
+    this->log_level = LOG_LEVEL;
 
-  logger->info("Инициализация сервера на порту {}...", port);
+    // пока логгер не готов пишем в обычный консольный поток
+    logger->warn("Используются настройки по умолчанию из common.hpp");
+  }
+
+  logger->info("Экземпляр ChatServer создан. Порт: {}, БД: {}", this->port, this->db_path);
 }
 
 ChatServer::~ChatServer() {
@@ -15,6 +25,30 @@ ChatServer::~ChatServer() {
 }
 
 std::atomic<bool> ChatServer::is_running(true);
+
+bool ChatServer::load_config(const std::string& path) {
+  std::ifstream f(path);
+  if (!f.is_open()) {
+    // Файла нет — сигнализируем об этом, чтобы конструктор взял дефолты
+    return false;
+  }
+
+  try {
+    json data = json::parse(f);
+
+    // Прямое обращение через .at() или [] выбросит исключение, если ключа нет
+    // Это гарантирует, что если конфиг ЕСТЬ, то он должен быть ПОЛНЫМ
+    this->port = data.at("port").get<int>();
+    this->db_path = data.at("db_path").get<std::string>();
+    this->log_level = data.at("log_level").get<std::string>();
+
+    return true;
+  } catch (const std::exception& e) {
+    // Сюда попадем и при ошибке парсинга, и при отсутствии ключа
+    std::cerr << "[CONFIG ERROR] Ошибка в файле конфигурации: " << e.what() << std::endl;
+    return false;
+  }
+}
 
 void ChatServer::signal_handler(int signal) {
   if (signal == SIGINT) {
@@ -103,7 +137,17 @@ void ChatServer::run() {
     std::thread(&ChatServer::handle_client, this, new_client_fd).detach();
   }
   // когда цикл завершился
-  logger->warn("Основной цикл приема завершен. Ожидание закрытия ресурсов...");
+  logger->warn("Формируем системный JSON-пакет отключения сервера");
+  json shutdown_msg;
+  shutdown_msg["type"] = "SYSTEM";
+  shutdown_msg["sender"] = "SERVER";
+  shutdown_msg["text"] = "Внимание: Сервер завершает работу. Соединение будет закрыто.";
+  shutdown_msg["timestamp"] = std::time(nullptr);
+  broadcast_message(shutdown_msg.dump(), -1);
+  // пауза нужна для того, чтобы сервер обработать данные на сетевой карте,
+  // затем отправить их, а уже после сработает деструктор close()
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  logger->info("Оповещение разослано. Переход к очистке ресурсов.");
 }
 
 void ChatServer::broadcast_message(const std::string& message, int sender_fd) {

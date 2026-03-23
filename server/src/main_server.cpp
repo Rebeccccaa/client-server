@@ -19,7 +19,7 @@ int main() {
   try {
     // если внутри try случится ошибка, деструктор ChatServer
     // вызовется автоматически и корректно закроет сокет.
-    auto server = std::make_unique<ChatServer>(PORT);
+    auto server = std::make_unique<ChatServer>(CFG_PATH);
 
     // настройка сетевых ресурсов
     if (server->start()) {

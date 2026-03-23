@@ -4,7 +4,7 @@
 class ChatServer {
  public:
   // инициализируем порт и ставим дескриптор в -1 (пока не открыт)
-  ChatServer(int port);
+  ChatServer(const std::string& config_path);
 
   // гарантирует закрытие главного сокета при выключении программы
   ~ChatServer();
@@ -14,6 +14,9 @@ class ChatServer {
   ChatServer& operator=(const ChatServer&) = delete;
   ChatServer(ChatServer&&) = delete;
   ChatServer& operator=(ChatServer&&) = delete;
+
+  //  метод загрузки конфигов из файла
+  bool load_config(const std::string& path);
 
   // метод для обработки сигналов
   static void signal_handler(int signal);
@@ -42,6 +45,9 @@ class ChatServer {
 
   int server_fd;             // дескриптор "слушающего" сокета
   int port;                  // номер порта
+  sqlite3* db;               // указатель на объект базы данных SQLite
   std::vector<int> clients;  // вектор "жетонов" всех активных клиентов
   std::mutex clients_mtx;    // замок для защиты вектора
+  std::string db_path;       // путь до базы данных
+  std::string log_level;     // уровень логирования
 };
