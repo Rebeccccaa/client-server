@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # Настройка сервера
+  chat-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: chat_server_container
+    ports:
+      - "9000:9000" # Проброс порта на твой ПК
+    volumes:
+      - ./server/db:/app/data # Проброс папки для базы данных (чтобы не терять историю)
+    networks:
+      - chat-network
+
+  # Настройка клиента
+  chat-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: chat_client_container
+    # Эти два флага заменяют -it (интерактивность)
+    stdin_open: true
+    tty: true
+    depends_on:
+      - chat-server # Клиент запустится только после сервера
+    networks:
+      - chat-network
+
+networks:
+  chat-network:
+    driver: bridge

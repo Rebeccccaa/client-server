@@ -1,0 +1,6 @@
+{
+    "server_ip_home": "127.0.0.1",
+    "server_ip": "chat_server",
+    "port": 9000,
+    "log_level": "debug"
+}

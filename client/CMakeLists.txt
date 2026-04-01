@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28.3)
+cmake_minimum_required(VERSION 3.27)
 project(ChatClient)
 
 # Стандарт C++17
@@ -12,6 +12,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 # 2. Находим библиотеку потоков
 find_package(Threads REQUIRED)
 
+# находим библ. логов
+find_package(spdlog REQUIRED)
+
 # 3. Создаем исполняемый файл. 
 # Указываем ПРАВИЛЬНЫЕ пути к файлам внутри папки src
 add_executable(chat_client 
@@ -23,5 +26,6 @@ add_executable(chat_client
 # Добавляем sqlite3 для будущего этапа
 target_link_libraries(chat_client 
     Threads::Threads 
+    spdlog::spdlog
     sqlite3
 )
