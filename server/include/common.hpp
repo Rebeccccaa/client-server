@@ -25,9 +25,9 @@ using json = nlohmann::json;
 
 const std::string CFG_PATH = "config.json";
 
-const int PORT = 7777;
+const int PORT = 9000;
 const int BUFFER_SIZE = 4096;
 const int LISTEN_BACKLOG = 10;
 const std::string COMMAND_EXIT = "/exit";
 inline std::string DB_PATH = "chat_history.db";
-inline std::string LOG_LEVEL = "info";
+inline spdlog::level::level_enum LOG_LEVEL = spdlog::level::info;

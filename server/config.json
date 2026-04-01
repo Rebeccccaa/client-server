@@ -1,5 +1,5 @@
 {
-    "port": 7575,
+    "port": 9000,
     "db_path": "chat_history.db",
-    "log_level": "info"
+    "log_level": "debug"
 }

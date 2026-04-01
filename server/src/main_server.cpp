@@ -25,7 +25,6 @@ int main() {
     if (server->start()) {
       // запуск бесконечного цикла
       server->run();
-
     } else {
       std::cerr << "[CRITICAL] Ошибка при старте сервера на порту " << PORT << std::endl;
       return 1;
