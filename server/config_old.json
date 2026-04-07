@@ -1,5 +1,5 @@
 {
-    "server_ip": "chat_server",
     "port": 9000,
+    "db_path": "chat_history.db",
     "log_level": "debug"
 }

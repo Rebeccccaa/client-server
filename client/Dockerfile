@@ -1,6 +1,9 @@
 # --- ЭТАП 1: СБОРКА (BUILDER) ---
 FROM alpine:3.19 AS builder
 
+# МЕНЯЕМ ЗЕРКАЛО (добавь эту строку):
+# RUN sed -i 's/dl-cdn.alpinelinux.org/mirror.yandex.ru/g' /etc/apk/repositories
+
 # Устанавливаем инструменты сборки
 # Клиенту sqlite-dev обычно не нужен, если он сам не пишет в БД, 
 # но оставим для совместимости с общими хедерами проекта.
@@ -26,6 +29,8 @@ RUN cmake --preset release && \
 
 # --- ЭТАП 2: ФИНАЛЬНЫЙ ОБРАЗ (RUNTIME) ---
 FROM alpine:3.19
+
+# RUN sed -i 's/dl-cdn.alpinelinux.org/mirror.yandex.ru/g' /etc/apk/repositories
 
 # Библиотеки для работы бинарника
 RUN apk add --no-cache \

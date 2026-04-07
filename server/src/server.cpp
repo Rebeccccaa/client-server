@@ -6,6 +6,9 @@ ChatServer::ChatServer(const std::string& config_path) : server_fd(-1), db(nullp
   // загружаем конфиг
   if (!load_config(config_path)) {
     // если файла нет или с ним чтото не так берем дефолты из common.hpp
+
+    std::cerr << "Критическая ошибка: не удалось загрузить " << config_path << ". Текущая директория: " << get_current_dir_name()
+              << std::endl;
     this->port = PORT;
     this->db_path = DB_PATH;
     this->log_level = LOG_LEVEL;
@@ -276,14 +279,19 @@ void ChatServer::save_message_to_db(const std::string& sender, const std::string
   sqlite3_finalize(stmt);
 }
 
-std::vector<json> ChatServer::get_last_messages(int count) {
-  if (!db) {
-    logger->error("Попытка доступа к неинициализированной базе данных!");
-    return;
-  }
+std::vector<json> ChatServer::get_last_messages(const int count) {
   std::vector<json> history;
-  history.reserve(count);  // оптимизация под известное количество
 
+  // 1. Проверяем, открыта ли вообще база
+  if (!db) {
+    logger->error("Ошибка: база данных не инициализирована!");
+    return history;  // Исправлено: возвращаем пустой вектор, а не "ничего"
+  }
+
+  // Заранее выделяем память, чтобы не тормозить при добавлении сообщений
+  history.reserve(count);
+
+  // SQL-запрос: берем последние сообщения, сортируя по ID сверху вниз
   static constexpr const char* sql =
       "SELECT sender, message, timestamp "
       "FROM messages "
@@ -291,41 +299,41 @@ std::vector<json> ChatServer::get_last_messages(int count) {
       "LIMIT ?;";
 
   sqlite3_stmt* stmt = nullptr;
+
+  // 2. Готовим запрос (компилируем его внутри SQLite)
   int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    logger->error("SQLite prepare failed in get_last_messages: [{}] {}", rc, sqlite3_errmsg(db));
+    logger->error("Не удалось подготовить запрос истории: {}", sqlite3_errmsg(db));
     return history;
   }
 
-  rc = sqlite3_bind_int(stmt, 1, count);
-  if (rc != SQLITE_OK) {
-    logger->error("Bind count failed: [{}] {}", rc, sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
-    return history;
-  }
+  // 3. Подставляем число (count) вместо знака "?" в запросе
+  sqlite3_bind_int(stmt, 1, count);
 
+  // 4. Идем по строчкам базы данных, пока они не кончатся
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     json msg;
 
-    const unsigned char* sender_text = sqlite3_column_text(stmt, 0);
-    const unsigned char* message_text = sqlite3_column_text(stmt, 1);
+    // Достаем текст из колонок (0 - отправитель, 1 - текст)
+    const unsigned char* s_ptr = sqlite3_column_text(stmt, 0);
+    const unsigned char* t_ptr = sqlite3_column_text(stmt, 1);
 
     msg["type"] = "CHAT";
-    msg["sender"] = sender_text ? reinterpret_cast<const char*>(sender_text) : "";
-    msg["text"] = message_text ? reinterpret_cast<const char*>(message_text) : "";
+    // Если в базе пусто (null), пишем пустую строку, чтобы не упасть
+    msg["sender"] = s_ptr ? reinterpret_cast<const char*>(s_ptr) : "System";
+    msg["text"] = t_ptr ? reinterpret_cast<const char*>(t_ptr) : "";
     msg["timestamp"] = sqlite3_column_int64(stmt, 2);
 
+    // std::move "переталкивает" объект в вектор без лишнего копирования
     history.push_back(std::move(msg));
   }
 
-  if (rc != SQLITE_DONE) {
-    logger->error("SQLite step failed in get_last_messages: [{}] {}", rc, sqlite3_errmsg(db));
-  }
-
+  // 5. Обязательно удаляем временный объект запроса, чтобы не текла память
   sqlite3_finalize(stmt);
 
-  // возвращаем в нормальном порядке (старые сверху, новые снизу)
+  // 6. Разворачиваем список, чтобы старые сообщения были сверху, а новые снизу
   std::reverse(history.begin(), history.end());
+
   return history;
 }
 
@@ -337,18 +345,24 @@ void ChatServer::init_logger() {
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("server.log", false);  // арг. false означает дописывать
 
+    // включаем цвета для Docker
+    console_sink->set_color_mode(spdlog::color_mode::always);
+
     // объединяем их в один объект логгера
     std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
-    logger = std::make_shared<spdlog::logger>("ChatServer", sinks.begin(), sinks.end());
+    this->logger = std::make_shared<spdlog::logger>("ChatServer", sinks.begin(), sinks.end());
 
     // настраиваем формат: [Время] [Уровень] Сообщение
     // %^...%$ раскрашивает уровень лога в консоли (красный для ошибок итд)
-    logger->set_pattern("[%Y-%m-%d %H:%M:%S] [%^%l%$] %v");
+    this->logger->set_pattern("[%Y-%m-%d %H:%M:%S] [%^%l%$] %v");
 
     // устанавливаем уровень фильтрации (пока пишем всё от INFO и выше)
-    logger->set_level(this->log_level);
+    this->logger->set_level(this->log_level);
 
-    logger->info("Система логирования инициализирована.");
+    // делаем этот логгер основным для всей программы
+    spdlog::set_default_logger(this->logger);
+
+    this->logger->info("Система логирования инициализирована.");
   } catch (const spdlog::spdlog_ex& ex) {
     std::cerr << "Критическая ошибка инициализации логов: " << ex.what() << std::endl;
   }

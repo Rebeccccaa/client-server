@@ -1,5 +1,5 @@
 {
-    "server_ip": "chat-server",
+    "server_ip": "127.0.0.1",
     "port": 9000,
     "log_level": "debug"
 }

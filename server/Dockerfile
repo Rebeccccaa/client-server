@@ -2,6 +2,9 @@
 # Используем фиксированную стабильную версию Alpine
 FROM alpine:3.19 AS builder
 
+# МЕНЯЕМ ЗЕРКАЛО (добавь эту строку):
+# RUN sed -i 's/dl-cdn.alpinelinux.org/mirror.yandex.ru/g' /etc/apk/repositories
+
 # 1. Устанавливаем системные зависимости для сборки
 # build-base: g++, make, libc-dev
 # linux-headers: заголовочные файлы ядра для работы с сокетами
@@ -30,6 +33,8 @@ RUN cmake --preset release && \
 
 # --- ЭТАП 2: ФИНАЛЬНЫЙ ОБРАЗ (RUNTIME) ---
 FROM alpine:3.19
+
+# RUN sed -i 's/dl-cdn.alpinelinux.org/mirror.yandex.ru/g' /etc/apk/repositories
 
 # 5. Устанавливаем только библиотеки времени выполнения (Shared Libs)
 # Это делает образ максимально легким (около 15-20 МБ)
