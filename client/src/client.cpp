@@ -1,5 +1,7 @@
 #include "client.hpp"
 
+#include <netdb.h>  // для докера
+
 // инициализация статического флага
 std::atomic<bool> ChatClient::is_running(true);
 
@@ -100,7 +102,6 @@ bool ChatClient::connect_to_server() {
   return true;
 }
 */
-#include <netdb.h>  //
 
 bool ChatClient::connect_to_server() {
   client_fd = socket(AF_INET, SOCK_STREAM, 0);

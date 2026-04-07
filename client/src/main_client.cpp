@@ -19,6 +19,7 @@ int main() {
 
   try {
     // используем умный указатель вместо обычного объекта на стеке
+    auto client = std::make_unique<ChatClient>("config_docker.json");  // если через Docker
     auto client = std::make_unique<ChatClient>("config.json");
     // auto client = std::make_unique<ChatClient>("109.120.187.67", PORT);
 

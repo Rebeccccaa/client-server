@@ -181,81 +181,150 @@ void ChatServer::broadcast_message(const std::string& message, int sender_fd) {
 
 // создаем файл бд и таблицу
 bool ChatServer::init_db() {
-  // открываем базу из конфига
-  if (sqlite3_open(this->db_path.c_str(), &db) != SQLITE_OK) {
+  int rc = sqlite3_open(db_path.c_str(), &db);
+  if (rc != SQLITE_OK) {
     logger->error("Не удалось открыть SQLite БД: {}", sqlite3_errmsg(db));
+    if (db) {
+      sqlite3_close(db);
+      db = nullptr;
+    }
     return false;
   }
 
-  // SQL запрос на создание таблицы
-  const char* sql =
-      "CREATE TABLE IF NOT EXISTS messages ("
-      "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-      "sender TEXT NOT NULL,"
-      "message TEXT NOT NULL,"
-      "timestamp INTEGER NOT NULL);";
+  const char* pragmas = R"(
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+    )";
+
+  rc = sqlite3_exec(db, pragmas, nullptr, nullptr, nullptr);
+  if (rc != SQLITE_OK) {
+    logger->error("Ошибка PRAGMA: {}", sqlite3_errmsg(db));
+    sqlite3_close(db);
+    db = nullptr;
+    return false;
+  }
+
+  const char* sql = R"(
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender TEXT NOT NULL,
+            message TEXT NOT NULL,
+            timestamp INTEGER NOT NULL
+        );
+    )";
 
   char* err_msg = nullptr;
-  if (sqlite3_exec(db, sql, nullptr, nullptr, &err_msg) != SQLITE_OK) {
-    logger->error("Ошибка создания таблицы БД: {}", err_msg);
+  rc = sqlite3_exec(db, sql, nullptr, nullptr, &err_msg);
+
+  if (rc != SQLITE_OK) {
+    logger->error("Ошибка создания таблицы: {}", err_msg);
     sqlite3_free(err_msg);
+    sqlite3_close(db);
+    db = nullptr;
     return false;
   }
 
-  logger->info("База данных успешно инициализирована: {}", this->db_path);
+  logger->info("SQLite инициализирован: {}", db_path);
   return true;
 }
 
-// для защиты от скл инъекций используем стандарт Prepared Statements
+// для защиты от скл инъекций используем стандарт Prepared Statements (sqlite3_prepare_v2())
 void ChatServer::save_message_to_db(const std::string& sender, const std::string& text, int64_t timestamp) {
-  const char* sql = "INSERT INTO messages (sender, message, timestamp) VALUES (?, ?, ?);";
-  sqlite3_stmt* stmt;
-
-  if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-    logger->error("Ошибка подготовки SQL: {}", sqlite3_errmsg(db));
+  if (!db) {
+    logger->error("Попытка доступа к неинициализированной базе данных!");
     return;
   }
 
-  // привязываем данные к знакам вопроса (безопасно)
-  sqlite3_bind_text(stmt, 1, sender.c_str(), -1, SQLITE_STATIC);
-  sqlite3_bind_text(stmt, 2, text.c_str(), -1, SQLITE_STATIC);
-  sqlite3_bind_int64(stmt, 3, timestamp);
+  static constexpr const char* sql =
+      "INSERT INTO messages (sender, message, timestamp) "
+      "VALUES (?, ?, ?);";
 
-  if (sqlite3_step(stmt) != SQLITE_DONE) {
-    logger->error("Ошибка записи сообщения в БД: {}", sqlite3_errmsg(db));
+  sqlite3_stmt* stmt = nullptr;
+
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    logger->error("SQLite prepare failed: [{}] {}", rc, sqlite3_errmsg(db));
+    return;
+  }
+
+  rc = sqlite3_bind_text(stmt, 1, sender.c_str(), static_cast<int>(sender.size()), SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    logger->error("Bind sender failed: [{}] {}", rc, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return;
+  }
+
+  rc = sqlite3_bind_text(stmt, 2, text.c_str(), static_cast<int>(text.size()), SQLITE_TRANSIENT);
+  if (rc != SQLITE_OK) {
+    logger->error("Bind text failed: [{}] {}", rc, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return;
+  }
+
+  rc = sqlite3_bind_int64(stmt, 3, timestamp);
+  if (rc != SQLITE_OK) {
+    logger->error("Bind timestamp failed: [{}] {}", rc, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    logger->error("SQLite insert failed: [{}] {}", rc, sqlite3_errmsg(db));
   }
 
   sqlite3_finalize(stmt);
 }
 
 std::vector<json> ChatServer::get_last_messages(int count) {
+  if (!db) {
+    logger->error("Попытка доступа к неинициализированной базе данных!");
+    return;
+  }
   std::vector<json> history;
-  // Берем последние N сообщений, сортируем по ID или времени
-  const char* sql =
-      "SELECT sender, message, timestamp FROM messages "
-      "ORDER BY id DESC LIMIT ?;";
+  history.reserve(count);  // оптимизация под известное количество
 
-  sqlite3_stmt* stmt;
-  if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-    logger->error("Ошибка подготовки истории: {}", sqlite3_errmsg(db));
+  static constexpr const char* sql =
+      "SELECT sender, message, timestamp "
+      "FROM messages "
+      "ORDER BY id DESC "
+      "LIMIT ?;";
+
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    logger->error("SQLite prepare failed in get_last_messages: [{}] {}", rc, sqlite3_errmsg(db));
     return history;
   }
 
-  sqlite3_bind_int(stmt, 1, count);
+  rc = sqlite3_bind_int(stmt, 1, count);
+  if (rc != SQLITE_OK) {
+    logger->error("Bind count failed: [{}] {}", rc, sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return history;
+  }
 
-  while (sqlite3_step(stmt) == SQLITE_ROW) {
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     json msg;
-    msg["type"] = "CHAT";  // Клиент подумает, что это обычное сообщение
-    msg["sender"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-    msg["text"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+
+    const unsigned char* sender_text = sqlite3_column_text(stmt, 0);
+    const unsigned char* message_text = sqlite3_column_text(stmt, 1);
+
+    msg["type"] = "CHAT";
+    msg["sender"] = sender_text ? reinterpret_cast<const char*>(sender_text) : "";
+    msg["text"] = message_text ? reinterpret_cast<const char*>(message_text) : "";
     msg["timestamp"] = sqlite3_column_int64(stmt, 2);
-    history.push_back(msg);
+
+    history.push_back(std::move(msg));
+  }
+
+  if (rc != SQLITE_DONE) {
+    logger->error("SQLite step failed in get_last_messages: [{}] {}", rc, sqlite3_errmsg(db));
   }
 
   sqlite3_finalize(stmt);
 
-  // Так как мы брали DESC (с конца), история перевернута.
-  // Разворачиваем обратно, чтобы старые были сверху, новые снизу.
+  // возвращаем в нормальном порядке (старые сверху, новые снизу)
   std::reverse(history.begin(), history.end());
   return history;
 }
@@ -380,7 +449,7 @@ void ChatServer::handle_client(int client_fd) {
           break;
         }
 
-        if (!msg_json.contains("type") || !msg_json.contains("type") || msg_json["type"].get<std::string>() != "CHAT") {
+        if (!msg_json.contains("type") || msg_json["type"].get<std::string>() != "CHAT") {
           throw std::runtime_error("Expected CHAT message");
         }
         if (!msg_json.contains("sender") || msg_json["sender"].get<std::string>().empty()) {
